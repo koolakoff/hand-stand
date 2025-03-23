@@ -1,171 +1,172 @@
 import tkinter as tk
 from tkinter import ttk
-import json
-import serial
+from pymodbus.client.serial import ModbusSerialClient as ModbusClient
 import serial.tools.list_ports
-import threading
-import time
 
-# Список параметров
-params = ["yaw", "horizontal", "vertical", "twist", "grab", "extra"]
+# Constants
+LOGICAL_MIN = 500
+LOGICAL_MAX = 2500
+MODBUS_UNIT_ID = 1
 
-MIN_VAL = 0
-MAX_VAL = 99
+VALUES_ACTUAL_ADDR = 10
+VALUES_MIN_ADDR = 20
+VALUES_MAX_ADDR = 30
 
-class ServoControlUI(tk.Tk):
-    def __init__(self):
-        super().__init__()
-        self.title("Servo Arm Controller")
-        self.geometry("600x550")
-        self.resizable(False, False)
+SERVO_NAMES = ["yaw", "horizontal", "vertical", "pitch", "twist", "grab"]
 
-        self.variables = {}
-        self.serial_thread = None
-        self.serial_running = False
-        self.serial_instance = None
+class ServoControlGroup:
+    def __init__(self, parent, name, index, write_callback):
+        self.index = index
+        self.write_callback = write_callback
 
-        for idx, param in enumerate(params):
-            self._create_control_row(idx, param)
+        self.frame = ttk.LabelFrame(parent, text=name)
+        self.frame.pack(fill='x', padx=5, pady=2)
 
-        self._create_command_section(len(params))
+        # Initial value
+        initial_value = (LOGICAL_MIN + LOGICAL_MAX) // 2
+        self.value_var = tk.IntVar(value=initial_value)
 
-    def _create_control_row(self, row, param_name):
-        var = tk.IntVar(value=50)
-        self.variables[param_name] = var
-
-        label = ttk.Label(self, text=param_name.capitalize(), width=12)
-        label.grid(row=row, column=0, padx=5, pady=5, sticky="w")
-
-        slider = ttk.Scale(
-            self,
-            from_=MIN_VAL,
-            to=MAX_VAL,
-            orient="horizontal",
-            variable=var,
-            command=lambda val, v=var, e=None: self._update_entry(v, entry)
+        # Slider
+        self.scale = ttk.Scale(
+            self.frame, from_=LOGICAL_MIN, to=LOGICAL_MAX,
+            orient='horizontal', command=self.on_slider_change
         )
-        slider.grid(row=row, column=1, padx=5, pady=5, sticky="ew")
+        self.scale.set(initial_value)
+        self.scale.pack(fill='x', padx=5, side='left', expand=True)
 
-        entry = ttk.Entry(self, width=5)
-        entry.insert(0, str(var.get()))
-        entry.grid(row=row, column=2, padx=5, pady=5)
+        # Entry field
+        self.entry = ttk.Entry(self.frame, width=5, textvariable=self.value_var)
+        self.entry.pack(side='left', padx=5)
+        self.entry.bind("<Return>", self.on_entry_change)
 
-        entry.bind("<Return>", lambda event, v=var, e=entry: self._update_var_from_entry(v, e))
+        # Set Min/Max buttons
+        self.btn_set_min = ttk.Button(self.frame, text="Set Min", command=self.set_min)
+        self.btn_set_min.pack(side='left', padx=2)
 
-    def _create_command_section(self, row):
-        # Выбор COM порта
-        ttk.Label(self, text="Select COM port:").grid(row=row, column=0, padx=5, sticky="w")
-        self.combobox = ttk.Combobox(self, values=self._get_serial_ports(), state="readonly", width=20)
-        self.combobox.grid(row=row, column=1, columnspan=2, pady=5, sticky="w")
-        if self.combobox["values"]:
-            self.combobox.current(0)
+        self.btn_set_max = ttk.Button(self.frame, text="Set Max", command=self.set_max)
+        self.btn_set_max.pack(side='left', padx=2)
 
-        # Кнопка отправки команды
-        button = ttk.Button(self, text="Generate command", command=self._generate_command)
-        button.grid(row=row+1, column=0, columnspan=3, pady=10)
+    def on_slider_change(self, value):
+        val = int(float(value))
+        self.value_var.set(val)
+        self.write_callback("values_actual", VALUES_ACTUAL_ADDR + self.index, val)
 
-        # Поле вывода команды
-        self.output_field = tk.Text(self, height=4, width=60, state="disabled")
-        self.output_field.grid(row=row+2, column=0, columnspan=3, padx=10, pady=5)
+    def on_entry_change(self, event):
+        try:
+            val = int(self.entry.get())
+            if LOGICAL_MIN <= val <= LOGICAL_MAX:
+                self.scale.set(val)
+                self.write_callback("values_actual", VALUES_ACTUAL_ADDR + self.index, val)
+            else:
+                raise ValueError()
+        except ValueError:
+            print(f"Invalid input for servo {self.index}")
 
-        # Поле логов входящих сообщений
-        ttk.Label(self, text="Serial Log:").grid(row=row+3, column=0, columnspan=3, padx=10, sticky="w")
+    def set_min(self):
+        val = self.value_var.get()
+        self.write_callback("values_min", VALUES_MIN_ADDR + self.index, val)
 
-        log_frame = tk.Frame(self)
-        log_frame.grid(row=row+4, column=0, columnspan=3, padx=10, pady=5, sticky="ew")
+    def set_max(self):
+        val = self.value_var.get()
+        self.write_callback("values_max", VALUES_MAX_ADDR + self.index, val)
 
-        self.log_field = tk.Text(log_frame, height=3, width=60, state="disabled", wrap="none")
-        scrollbar = ttk.Scrollbar(log_frame, orient="vertical", command=self.log_field.yview)
-        self.log_field.configure(yscrollcommand=scrollbar.set)
+    def update_value(self, val):
+        self.value_var.set(val)
+        self.scale.set(val)
 
-        self.log_field.pack(side="left", fill="both", expand=True)
-        scrollbar.pack(side="right", fill="y")
+class ModbusServoApp:
+    def __init__(self, root):
+        self.root = root
+        self.root.title("Modbus Servo Control")
+        self.client = None
 
-        # Запуск фонового потока
-        self.after(100, self._start_serial_reader)
+        self.setup_ui()
 
-    def _get_serial_ports(self):
+    def setup_ui(self):
+        # Top frame for COM port selection
+        top_frame = ttk.Frame(self.root)
+        top_frame.pack(pady=5, padx=5, fill='x')
+
+        ttk.Label(top_frame, text="COM port:").pack(side='left')
+
+        self.combobox = ttk.Combobox(top_frame, state='readonly')
+        self.combobox['values'] = self.get_serial_ports()
+        self.combobox.bind("<<ComboboxSelected>>", self.on_port_selected)
+        self.combobox.pack(side='left', padx=5)
+
+        self.status_label = tk.Label(top_frame, text="not available", bg='red', fg='white', width=15)
+        self.status_label.pack(side='left', padx=10)
+
+        # Tabs
+        self.tabs = ttk.Notebook(self.root)
+        self.tabs.pack(fill='both', expand=True)
+
+        # Manual tab
+        self.manual_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.manual_tab, text="Manual")
+
+        self.servo_controls = []
+        for i, name in enumerate(SERVO_NAMES):
+            group = ServoControlGroup(self.manual_tab, name, i, self.write_register)
+            self.servo_controls.append(group)
+
+        # Script tab placeholder
+        self.script_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.script_tab, text="Script")
+
+    def get_serial_ports(self):
         ports = serial.tools.list_ports.comports()
         return [port.device for port in ports]
 
-    def _generate_command(self):
-        command = {name: self.variables[name].get() for name in self.variables}
-        json_str = json.dumps(command)
-        print("Generated:", json_str)
-        self._display_output(json_str)
-        self._send_serial(json_str)
-
-    def _display_output(self, text):
-        self.output_field.config(state="normal")
-        self.output_field.delete(1.0, tk.END)
-        self.output_field.insert(tk.END, text)
-        self.output_field.config(state="disabled")
-
-    def _log_input(self, line):
-        self.log_field.config(state="normal")
-        self.log_field.insert(tk.END, line + "\n")
-        self.log_field.see(tk.END)
-        self.log_field.config(state="disabled")
-
-    def _send_serial(self, text):
+    def on_port_selected(self, event):
         port = self.combobox.get()
         if not port:
-            print("No COM port selected.")
+            self.set_status(False)
             return
+
+        self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
+                                   stopbits=1, bytesize=8, parity='N')
+        if not self.client.connect():
+            self.set_status(False)
+            return
+
         try:
-            with serial.Serial(port, 9600, timeout=1) as ser:
-                ser.write((text + '\n').encode('utf-8'))
-                print(f"Sent to {port}")
-        except serial.SerialException as e:
-            print(f"Failed to send to {port}: {e}")
-
-    def _start_serial_reader(self):
-        if self.serial_thread is None:
-            self.serial_running = True
-            self.serial_thread = threading.Thread(target=self._serial_read_loop, daemon=True)
-            self.serial_thread.start()
-
-    def _serial_read_loop(self):
-        while self.serial_running:
-            port = self.combobox.get()
-            if not port:
-                time.sleep(1)
-                continue
-            try:
-                if self.serial_instance is None or not self.serial_instance.is_open:
-                    self.serial_instance = serial.Serial(port, 9600, timeout=1)
-
-                if self.serial_instance.in_waiting > 0:
-                    line = self.serial_instance.readline().decode("utf-8", errors="ignore").strip()
-                    if line:
-                        print("received:", line)
-                        self.after(0, self._log_input, line)
-            except serial.SerialException:
-                self.serial_instance = None
-            time.sleep(0.1)
-
-    def _update_entry(self, var, entry):
-        entry.delete(0, tk.END)
-        entry.insert(0, str(int(var.get())))
-
-    def _update_var_from_entry(self, var, entry):
-        try:
-            value = int(entry.get())
-            if MIN_VAL <= value <= MAX_VAL:
-                var.set(value)
+            result = self.client.read_holding_registers(address=VALUES_ACTUAL_ADDR, count=6, unit=MODBUS_UNIT_ID)
+            if result.isError():
+                self.set_status(False)
+                print("error read values_actual")
             else:
-                raise ValueError
-        except ValueError:
-            entry.delete(0, tk.END)
-            entry.insert(0, str(var.get()))
+                values = result.registers
+                print(f"got values_actual [0..5] {', '.join(map(str, values))}")
+                for i, val in enumerate(values):
+                    self.servo_controls[i].update_value(val)
+                self.set_status(True)
+        except Exception as e:
+            self.set_status(False)
+            print("error read values_actual:", e)
+        finally:
+            self.client.close()
 
-    def on_close(self):
-        self.serial_running = False
-        if self.serial_instance and self.serial_instance.is_open:
-            self.serial_instance.close()
-        self.destroy()
+    def set_status(self, is_ready):
+        if is_ready:
+            self.status_label.config(text="ready", bg='green')
+        else:
+            self.status_label.config(text="not available", bg='red')
+
+    def write_register(self, reg_type, address, value):
+        print(f"send {reg_type} [{address % 10}] {value}")
+        try:
+            self.client = ModbusClient(method='rtu', port=self.combobox.get(), baudrate=9600, timeout=1,
+                                       stopbits=1, bytesize=8, parity='N')
+            if self.client.connect():
+                result = self.client.write_register(address=address, value=value, unit=MODBUS_UNIT_ID)
+                if result.isError():
+                    print(f"error send {reg_type} [{address % 10}] {value}")
+                self.client.close()
+        except Exception as e:
+            print(f"error send {reg_type} [{address % 10}] {value} -> {e}")
 
 if __name__ == "__main__":
-    app = ServoControlUI()
-    app.protocol("WM_DELETE_WINDOW", app.on_close)
-    app.mainloop()
+    root = tk.Tk()
+    app = ModbusServoApp(root)
+    root.mainloop()
