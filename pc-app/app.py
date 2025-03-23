@@ -1,13 +1,17 @@
 import tkinter as tk
-from tkinter import ttk
+from tkinter import ttk, filedialog, messagebox
 from pymodbus.client.serial import ModbusSerialClient as ModbusClient
 import serial.tools.list_ports
+import json
+import threading
+import time
 
 # Constants
-LOGICAL_MIN = 500
-LOGICAL_MAX = 2500
+LOGICAL_MIN = 0
+LOGICAL_MAX = 999
 MODBUS_UNIT_ID = 1
 
+VALUES_LOGICAL_ADDR = 100
 VALUES_ACTUAL_ADDR = 10
 VALUES_MIN_ADDR = 20
 VALUES_MAX_ADDR = 30
@@ -22,11 +26,9 @@ class ServoControlGroup:
         self.frame = ttk.LabelFrame(parent, text=name)
         self.frame.pack(fill='x', padx=5, pady=2)
 
-        # Initial value
         initial_value = (LOGICAL_MIN + LOGICAL_MAX) // 2
         self.value_var = tk.IntVar(value=initial_value)
 
-        # Slider
         self.scale = ttk.Scale(
             self.frame, from_=LOGICAL_MIN, to=LOGICAL_MAX,
             orient='horizontal', command=self.on_slider_change
@@ -34,12 +36,10 @@ class ServoControlGroup:
         self.scale.set(initial_value)
         self.scale.pack(fill='x', padx=5, side='left', expand=True)
 
-        # Entry field
         self.entry = ttk.Entry(self.frame, width=5, textvariable=self.value_var)
         self.entry.pack(side='left', padx=5)
         self.entry.bind("<Return>", self.on_entry_change)
 
-        # Set Min/Max buttons
         self.btn_set_min = ttk.Button(self.frame, text="Set Min", command=self.set_min)
         self.btn_set_min.pack(side='left', padx=2)
 
@@ -57,10 +57,8 @@ class ServoControlGroup:
             if LOGICAL_MIN <= val <= LOGICAL_MAX:
                 self.scale.set(val)
                 self.write_callback("values_actual", VALUES_ACTUAL_ADDR + self.index, val)
-            else:
-                raise ValueError()
         except ValueError:
-            print(f"Invalid input for servo {self.index}")
+            pass
 
     def set_min(self):
         val = self.value_var.get()
@@ -74,21 +72,176 @@ class ServoControlGroup:
         self.value_var.set(val)
         self.scale.set(val)
 
+class ScriptTab:
+    def __init__(self, parent, write_logical_callback):
+        self.parent = parent
+        self.write_logical_callback = write_logical_callback
+        self.script_data = []
+        self.running = False
+        self.setup_ui()
+
+    def setup_ui(self):
+        top_frame = ttk.Frame(self.parent)
+        top_frame.pack(fill="x", padx=5, pady=5)
+        ttk.Button(top_frame, text="Load", command=self.load_script).pack(side="left", padx=2)
+        ttk.Button(top_frame, text="Save", command=self.save_script).pack(side="left", padx=2)
+
+        table_frame = ttk.Frame(self.parent)
+        table_frame.pack(fill="both", expand=True, padx=5)
+        self.table_text = tk.Text(table_frame, height=10)
+        self.table_text.pack(side="left", fill="both", expand=True)
+        self.table_scroll = ttk.Scrollbar(table_frame, command=self.table_text.yview)
+        self.table_scroll.pack(side="right", fill="y")
+        self.table_text.config(yscrollcommand=self.table_scroll.set)
+
+        control_frame = ttk.Frame(self.parent)
+        control_frame.pack(fill="x", pady=5, padx=5)
+        ttk.Label(control_frame, text="number:").pack(side="left")
+        self.number_var = tk.IntVar(value=1)
+        self.number_entry = ttk.Entry(control_frame, width=5, textvariable=self.number_var)
+        self.number_entry.pack(side="left", padx=5)
+        self.number_entry.bind("<Return>", self.on_number_change)
+
+        self.btn_step = ttk.Button(control_frame, text="Step", command=self.step)
+        self.btn_step.pack(side="left", padx=2)
+        self.btn_go = ttk.Button(control_frame, text="Go", command=self.go)
+        self.btn_go.pack(side="left", padx=2)
+        self.btn_stop = ttk.Button(control_frame, text="Stop", command=self.stop)
+        self.btn_stop.pack(side="left", padx=2)
+        self.btn_add = ttk.Button(control_frame, text="Add-after", command=self.add_after)
+        self.btn_add.pack(side="left", padx=10)
+
+        self.servo_controls = {}
+        servo_frame = ttk.Frame(self.parent)
+        servo_frame.pack(fill="x", pady=5)
+        for name in SERVO_NAMES:
+            group = ttk.LabelFrame(servo_frame, text=name)
+            group.pack(side="left", padx=5, pady=5)
+            var = tk.IntVar(value=499)
+            entry = ttk.Entry(group, width=5, textvariable=var)
+            entry.pack()
+            scale = ttk.Scale(group, from_=LOGICAL_MIN, to=LOGICAL_MAX, orient="vertical")
+            scale.set(499)
+            scale.pack()
+            self.servo_controls[name] = {"var": var, "scale": scale, "entry": entry}
+            scale.config(command=lambda val, n=name: self.on_slider_change(n, val))
+            entry.bind("<Return>", lambda e, n=name: self.on_entry_change(n))
+
+        delay_frame = ttk.Frame(self.parent)
+        delay_frame.pack(pady=5)
+        ttk.Label(delay_frame, text="delay (ms):").pack(side="left")
+        self.delay_var = tk.IntVar(value=2000)
+        self.delay_entry = ttk.Entry(delay_frame, width=8, textvariable=self.delay_var)
+        self.delay_entry.pack(side="left")
+
+        default_entry = {"servos": {name: 499 for name in SERVO_NAMES}, "delay": 2000}
+        self.script_data.append(default_entry)
+        self.refresh_table()
+        self.update_step_button()
+
+    def refresh_table(self):
+        self.table_text.delete("1.0", tk.END)
+        for i, row in enumerate(self.script_data, start=1):
+            self.table_text.insert(tk.END, f"{i} | {json.dumps(row)}\n")
+        self.update_step_button()
+
+    def load_script(self):
+        path = filedialog.askopenfilename(filetypes=[("JSON files", "*.txt *.json")])
+        if not path:
+            return
+        try:
+            with open(path, "r") as f:
+                self.script_data = json.load(f)
+            self.refresh_table()
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to load script: {e}")
+
+    def save_script(self):
+        path = filedialog.asksaveasfilename(defaultextension=".json", filetypes=[("JSON files", "*.json")])
+        if not path:
+            return
+        try:
+            with open(path, "w") as f:
+                json.dump(self.script_data, f, indent=2)
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to save script: {e}")
+
+    def on_number_change(self, event=None):
+        idx = self.number_var.get() - 1
+        if 0 <= idx < len(self.script_data):
+            row = self.script_data[idx]
+            for name in SERVO_NAMES:
+                value = row["servos"].get(name, 499)
+                self.servo_controls[name]["var"].set(value)
+                self.servo_controls[name]["scale"].set(value)
+            self.delay_var.set(row.get("delay", 2000))
+            for name in SERVO_NAMES:
+                self.write_logical_callback(name, self.servo_controls[name]["var"].get())
+        self.update_step_button()
+
+    def on_slider_change(self, name, value):
+        val = int(float(value))
+        self.servo_controls[name]["var"].set(val)
+        self.write_logical_callback(name, val)
+
+    def on_entry_change(self, name):
+        try:
+            val = int(self.servo_controls[name]["entry"].get())
+            val = max(LOGICAL_MIN, min(LOGICAL_MAX, val))
+            self.servo_controls[name]["var"].set(val)
+            self.servo_controls[name]["scale"].set(val)
+            self.write_logical_callback(name, val)
+        except ValueError:
+            pass
+
+    def add_after(self):
+        idx = self.number_var.get()
+        new_row = {
+            "servos": {name: self.servo_controls[name]["var"].get() for name in SERVO_NAMES},
+            "delay": self.delay_var.get()
+        }
+        self.script_data.insert(idx, new_row)
+        self.refresh_table()
+
+    def update_step_button(self):
+        if self.number_var.get() >= len(self.script_data):
+            self.btn_step.config(state="disabled")
+        else:
+            self.btn_step.config(state="normal")
+
+    def step(self):
+        if self.number_var.get() < len(self.script_data):
+            self.number_var.set(self.number_var.get() + 1)
+            self.on_number_change()
+
+    def go(self):
+        if self.running:
+            return
+        self.running = True
+
+        def run_loop():
+            while self.running and self.number_var.get() < len(self.script_data):
+                self.step()
+                time.sleep(self.delay_var.get() / 1000.0)
+            self.running = False
+
+        threading.Thread(target=run_loop, daemon=True).start()
+
+    def stop(self):
+        self.running = False
+
 class ModbusServoApp:
     def __init__(self, root):
         self.root = root
         self.root.title("Modbus Servo Control")
         self.client = None
-
         self.setup_ui()
 
     def setup_ui(self):
-        # Top frame for COM port selection
         top_frame = ttk.Frame(self.root)
         top_frame.pack(pady=5, padx=5, fill='x')
 
         ttk.Label(top_frame, text="COM port:").pack(side='left')
-
         self.combobox = ttk.Combobox(top_frame, state='readonly')
         self.combobox['values'] = self.get_serial_ports()
         self.combobox.bind("<<ComboboxSelected>>", self.on_port_selected)
@@ -97,22 +250,20 @@ class ModbusServoApp:
         self.status_label = tk.Label(top_frame, text="not available", bg='red', fg='white', width=15)
         self.status_label.pack(side='left', padx=10)
 
-        # Tabs
         self.tabs = ttk.Notebook(self.root)
         self.tabs.pack(fill='both', expand=True)
 
-        # Manual tab
         self.manual_tab = ttk.Frame(self.tabs)
         self.tabs.add(self.manual_tab, text="Manual")
+        self.script_tab = ttk.Frame(self.tabs)
+        self.tabs.add(self.script_tab, text="Script")
 
         self.servo_controls = []
         for i, name in enumerate(SERVO_NAMES):
             group = ServoControlGroup(self.manual_tab, name, i, self.write_register)
             self.servo_controls.append(group)
 
-        # Script tab placeholder
-        self.script_tab = ttk.Frame(self.tabs)
-        self.tabs.add(self.script_tab, text="Script")
+        self.script = ScriptTab(self.script_tab, self.write_logical_named)
 
     def get_serial_ports(self):
         ports = serial.tools.list_ports.comports()
@@ -134,16 +285,13 @@ class ModbusServoApp:
             result = self.client.read_holding_registers(address=VALUES_ACTUAL_ADDR, count=6, unit=MODBUS_UNIT_ID)
             if result.isError():
                 self.set_status(False)
-                print("error read values_actual")
             else:
                 values = result.registers
-                print(f"got values_actual [0..5] {', '.join(map(str, values))}")
                 for i, val in enumerate(values):
                     self.servo_controls[i].update_value(val)
                 self.set_status(True)
-        except Exception as e:
+        except Exception:
             self.set_status(False)
-            print("error read values_actual:", e)
         finally:
             self.client.close()
 
@@ -154,17 +302,23 @@ class ModbusServoApp:
             self.status_label.config(text="not available", bg='red')
 
     def write_register(self, reg_type, address, value):
+        port = self.combobox.get()
+        if not port:
+            return
         print(f"send {reg_type} [{address % 10}] {value}")
         try:
-            self.client = ModbusClient(method='rtu', port=self.combobox.get(), baudrate=9600, timeout=1,
+            self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
                                        stopbits=1, bytesize=8, parity='N')
             if self.client.connect():
-                result = self.client.write_register(address=address, value=value, unit=MODBUS_UNIT_ID)
-                if result.isError():
-                    print(f"error send {reg_type} [{address % 10}] {value}")
+                self.client.write_register(address=address, value=value, unit=MODBUS_UNIT_ID)
                 self.client.close()
         except Exception as e:
             print(f"error send {reg_type} [{address % 10}] {value} -> {e}")
+
+    def write_logical_named(self, name, value):
+        if name in SERVO_NAMES:
+            index = SERVO_NAMES.index(name)
+            self.write_register("values_logical", VALUES_LOGICAL_ADDR + index, value)
 
 if __name__ == "__main__":
     root = tk.Tk()
