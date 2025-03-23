@@ -12,3 +12,8 @@ Used Arduino library [ModbusRTU by Alexander Emelianov](https://github.com/Emeli
 Note, this project is slightly less than completely generated with help of ChatGPT:
 - [Python UI app](https://chatgpt.com/share/67df3f7c-22ac-8003-bc4e-ac7ea6982ebe)
 - [Arduino app, example of Python app modbus lib usage](https://chatgpt.com/share/67df3fd8-3cd4-8003-992e-2c174c5f28f8)
+
+Libraries installation instructions
+1. For install python lib use command `pip install pymodbus pyserial`
+2. For install Arduino lib in Arduino studio run 
+`Sketch`->`Include library`->`Manage Libraries...` search and install `ModbusRTU Alexander Emelianov`
