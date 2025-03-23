@@ -73,9 +73,10 @@ class ServoControlGroup:
         self.scale.set(val)
 
 class ScriptTab:
-    def __init__(self, parent, write_logical_callback):
+    def __init__(self, parent, write_logical_callback, write_logical_array_callback):
         self.parent = parent
         self.write_logical_callback = write_logical_callback
+        self.write_logical_array_callback = write_logical_array_callback
         self.script_data = []
         self.running = False
         self.setup_ui()
@@ -175,8 +176,8 @@ class ScriptTab:
                 self.servo_controls[name]["var"].set(value)
                 self.servo_controls[name]["scale"].set(value)
             self.delay_var.set(row.get("delay", 2000))
-            for name in SERVO_NAMES:
-                self.write_logical_callback(name, self.servo_controls[name]["var"].get())
+            values = [row["servos"].get(name, 499) for name in SERVO_NAMES]
+            self.write_logical_array_callback(values)
         self.update_step_button()
 
     def on_slider_change(self, name, value):
@@ -263,7 +264,7 @@ class ModbusServoApp:
             group = ServoControlGroup(self.manual_tab, name, i, self.write_register)
             self.servo_controls.append(group)
 
-        self.script = ScriptTab(self.script_tab, self.write_logical_named)
+        self.script = ScriptTab(self.script_tab, self.write_logical_named, self.write_logical_array)
 
     def get_serial_ports(self):
         ports = serial.tools.list_ports.comports()
@@ -274,23 +275,25 @@ class ModbusServoApp:
         if not port:
             self.set_status(False)
             return
-
         self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
                                    stopbits=1, bytesize=8, parity='N')
         if not self.client.connect():
             self.set_status(False)
+            print("error read values_actual -> connect failed")
             return
-
         try:
             result = self.client.read_holding_registers(address=VALUES_ACTUAL_ADDR, count=6, unit=MODBUS_UNIT_ID)
             if result.isError():
+                print("error read values_actual ->", result)
                 self.set_status(False)
             else:
                 values = result.registers
+                print("got values_actual [0..5]", ", ".join(map(str, values)))
                 for i, val in enumerate(values):
                     self.servo_controls[i].update_value(val)
                 self.set_status(True)
-        except Exception:
+        except Exception as e:
+            print("error read values_actual ->", e)
             self.set_status(False)
         finally:
             self.client.close()
@@ -304,6 +307,7 @@ class ModbusServoApp:
     def write_register(self, reg_type, address, value):
         port = self.combobox.get()
         if not port:
+            print(f"error send {reg_type} [{address % 10}] {value} -> port not selected")
             return
         print(f"send {reg_type} [{address % 10}] {value}")
         try:
@@ -312,6 +316,8 @@ class ModbusServoApp:
             if self.client.connect():
                 self.client.write_register(address=address, value=value, unit=MODBUS_UNIT_ID)
                 self.client.close()
+            else:
+                print(f"error send {reg_type} [{address % 10}] {value} -> connect failed")
         except Exception as e:
             print(f"error send {reg_type} [{address % 10}] {value} -> {e}")
 
@@ -319,6 +325,23 @@ class ModbusServoApp:
         if name in SERVO_NAMES:
             index = SERVO_NAMES.index(name)
             self.write_register("values_logical", VALUES_LOGICAL_ADDR + index, value)
+
+    def write_logical_array(self, values):
+        port = self.combobox.get()
+        if not port:
+            print("error send values_logical [0..5] -> port not selected")
+            return
+        print("send values_logical [0..5]", ", ".join(map(str, values)))
+        try:
+            self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
+                                       stopbits=1, bytesize=8, parity='N')
+            if self.client.connect():
+                self.client.write_registers(address=VALUES_LOGICAL_ADDR, values=values, unit=MODBUS_UNIT_ID)
+                self.client.close()
+            else:
+                print("error send values_logical [0..5] -> connect failed")
+        except Exception as e:
+            print("error send values_logical [0..5] ->", e)
 
 if __name__ == "__main__":
     root = tk.Tk()
