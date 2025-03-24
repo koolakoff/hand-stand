@@ -111,6 +111,10 @@ class ScriptTab:
         self.btn_stop = ttk.Button(control_frame, text="Stop", command=self.stop)
         self.btn_stop.pack(side="left", padx=2)
         self.btn_add = ttk.Button(control_frame, text="Add-after", command=self.add_after)
+        self.btn_update = ttk.Button(control_frame, text="Update", command=self.update_selected)
+        self.btn_update.pack(side="left", padx=2)
+        self.btn_delete = ttk.Button(control_frame, text="Delete", command=self.delete_selected)
+        self.btn_delete.pack(side="left", padx=2)
         self.btn_add.pack(side="left", padx=10)
 
         self.servo_controls = {}
@@ -210,11 +214,15 @@ class ScriptTab:
         if not all_iids:
             return
         if not selected:
-            next_iid = all_iids[0]
+            next_index = 0
         else:
             current_index = all_iids.index(selected[0])
-            next_index = current_index + 1 if current_index + 1 < len(all_iids) else current_index
-            next_iid = all_iids[next_index]
+            if current_index + 1 >= len(all_iids):
+                self.running = False  # End of script
+                return
+            next_index = current_index + 1
+
+        next_iid = all_iids[next_index]
         self.table.selection_set(next_iid)
         self.table.focus(next_iid)
         self.on_tree_select(None)
@@ -248,6 +256,36 @@ class ScriptTab:
             self.delay_var.set(row.get('delay', 2000))
         except Exception as e:
             print("error parsing selected row ->", e)
+
+    def delete_selected(self):
+        selected = self.table.selection()
+        if not selected:
+            return
+        index = self.table.index(selected[0])
+        if len(self.script_data) <= 1:
+            print("Cannot delete last remaining row")
+            return
+        self.script_data.pop(index)
+        self.refresh_table()
+        remaining = self.table.get_children()
+        if remaining:
+            new_index = max(0, index - 1)
+            self.table.selection_set(remaining[new_index])
+
+    def update_selected(self):
+        selected = self.table.selection()
+        if not selected:
+            return
+        try:
+            index = self.table.index(selected[0])
+            values = {name: self.servo_controls[name]['var'].get() for name in SERVO_NAMES}
+            delay_val = self.delay_var.get()
+            full = {"servos": values, "delay": delay_val}
+            self.script_data[index] = full
+            self.refresh_table()
+            self.table.selection_set(self.table.get_children()[index])
+        except Exception as e:
+            print("error updating row ->", e)
 
     def stop(self):
         self.running = False
