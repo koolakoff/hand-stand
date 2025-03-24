@@ -129,7 +129,9 @@ class ScriptTab:
             scale = ttk.Scale(group, from_=LOGICAL_MIN, to=LOGICAL_MAX, orient="vertical")
             scale.set(499)
             scale.pack()
-            self.servo_controls[name] = {"var": var, "scale": scale, "entry": entry}
+            self.servo_controls[name] = {"var": var, "scale": scale, "entry": entry, "updating": False}
+            scale.config(command=lambda val, n=name: self.on_slider_change(n, val))
+            entry.bind("<Return>", lambda e, n=name: self.on_entry_change(n))
             scale.config(command=lambda val, n=name: self.on_slider_change(n, val))
             entry.bind("<Return>", lambda e, n=name: self.on_entry_change(n))
 
@@ -173,17 +175,30 @@ class ScriptTab:
             messagebox.showerror("Error", f"Failed to save script: {e}")
 
     def on_slider_change(self, name, value):
+        if self.servo_controls[name].get("updating"):
+            return
         val = int(float(value))
         self.servo_controls[name]["var"].set(val)
-        # self.write_logical_callback(name, val)
+        self.write_logical_callback(name, val)
+
+        self.write_logical_callback(name, val)
 
     def on_entry_change(self, name):
+        if self.servo_controls[name].get("updating"):
+            return
         try:
             val = int(self.servo_controls[name]["entry"].get())
             val = max(LOGICAL_MIN, min(LOGICAL_MAX, val))
             self.servo_controls[name]["var"].set(val)
             self.servo_controls[name]["scale"].set(val)
-            # self.write_logical_callback(name, val)
+            self.write_logical_callback(name, val)
+        except ValueError:
+            pass
+
+
+        except ValueError:
+            pass
+            self.write_logical_callback(name, val)
         except ValueError:
             pass
         except ValueError:
@@ -265,8 +280,12 @@ class ScriptTab:
             row = json.loads(item['values'][0])
             for name in SERVO_NAMES:
                 value = row['servos'].get(name, 499)
+                self.servo_controls[name]["updating"] = True
                 self.servo_controls[name]['var'].set(value)
                 self.servo_controls[name]['scale'].set(value)
+                self.servo_controls[name]['entry'].delete(0, tk.END)
+                self.servo_controls[name]['entry'].insert(0, str(value))
+                self.servo_controls[name]["updating"] = False
             self.delay_var.set(row.get('delay', 2000))
             self.send_current_row()
             # self.send_current_row()
