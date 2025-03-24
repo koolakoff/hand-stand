@@ -81,6 +81,7 @@ class ScriptTab:
         self.write_logical_array_callback = write_logical_array_callback
         self.script_data = []
         self.running = False
+        self.slider_debounce_timers = {}
         self.setup_ui()
 
     def setup_ui(self):
@@ -177,9 +178,25 @@ class ScriptTab:
     def on_slider_change(self, name, value):
         if self.servo_controls[name].get("updating"):
             return
+
         val = int(float(value))
+        previous_val = self.servo_controls[name]["var"].get()
+        if val == previous_val:
+            return
+
         self.servo_controls[name]["var"].set(val)
-        self.write_logical_callback(name, val)
+
+        # Cancel previous timer if exists
+        if name in self.slider_debounce_timers:
+            self.slider_debounce_timers[name].cancel()
+
+        # Start new debounce timer
+        def delayed_send():
+            self.write_logical_callback(name, val)
+
+        timer = threading.Timer(0.1, delayed_send)
+        self.slider_debounce_timers[name] = timer
+        timer.start()
 
         self.write_logical_callback(name, val)
 
