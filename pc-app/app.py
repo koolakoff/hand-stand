@@ -175,7 +175,7 @@ class ScriptTab:
     def on_slider_change(self, name, value):
         val = int(float(value))
         self.servo_controls[name]["var"].set(val)
-        self.write_logical_callback(name, val)
+        # self.write_logical_callback(name, val)
 
     def on_entry_change(self, name):
         try:
@@ -183,7 +183,9 @@ class ScriptTab:
             val = max(LOGICAL_MIN, min(LOGICAL_MAX, val))
             self.servo_controls[name]["var"].set(val)
             self.servo_controls[name]["scale"].set(val)
-            self.write_logical_callback(name, val)
+            # self.write_logical_callback(name, val)
+        except ValueError:
+            pass
         except ValueError:
             pass
 
@@ -224,8 +226,8 @@ class ScriptTab:
 
         next_iid = all_iids[next_index]
         self.table.selection_set(next_iid)
-        self.table.focus(next_iid)
-        self.on_tree_select(None)
+        # Treeview selection change will trigger on_tree_select automatically
+        # Removed redundant focus to avoid duplicate event triggers
 
     def go(self):
         if self.running:
@@ -242,6 +244,18 @@ class ScriptTab:
 
         threading.Thread(target=run_loop, daemon=True).start()
 
+    def send_current_row(self):
+        selected = self.table.selection()
+        if not selected:
+            return
+        item = self.table.item(selected[0])
+        try:
+            row = json.loads(item['values'][0])
+            values = [row['servos'].get(name, 499) for name in SERVO_NAMES]
+            self.write_logical_array_callback(values)
+        except Exception as e:
+            print("error sending current row ->", e)
+
     def on_tree_select(self, event):
         selected = self.table.selection()
         if not selected:
@@ -254,6 +268,8 @@ class ScriptTab:
                 self.servo_controls[name]['var'].set(value)
                 self.servo_controls[name]['scale'].set(value)
             self.delay_var.set(row.get('delay', 2000))
+            self.send_current_row()
+            # self.send_current_row()
         except Exception as e:
             print("error parsing selected row ->", e)
 
@@ -389,7 +405,7 @@ class ModbusServoApp:
     def write_logical_array(self, values):
         port = self.combobox.get()
         if not port:
-            print("error send values_logical [0..5] -> port not selected")
+            print("send values_logical [0..5]", ", ".join(map(str, values)), " -> port not selected")
             return
         print("send values_logical [0..5]", ", ".join(map(str, values)))
         try:
