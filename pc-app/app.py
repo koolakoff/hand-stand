@@ -89,11 +89,15 @@ class ScriptTab:
 
         table_frame = ttk.Frame(self.parent)
         table_frame.pack(fill="both", expand=True, padx=5)
-        self.table_text = tk.Text(table_frame, height=10)
-        self.table_text.pack(side="left", fill="both", expand=True)
-        self.table_scroll = ttk.Scrollbar(table_frame, command=self.table_text.yview)
+        self.table = ttk.Treeview(table_frame, columns=("data",), show="headings")
+        self.table.heading("data", text="Script Row")
+        self.table.pack(side="left", fill="both", expand=True)
+
+        self.table_scroll = ttk.Scrollbar(table_frame, command=self.table.yview)
         self.table_scroll.pack(side="right", fill="y")
-        self.table_text.config(yscrollcommand=self.table_scroll.set)
+        self.table.config(yscrollcommand=self.table_scroll.set)
+
+        self.table.bind("<<TreeviewSelect>>", self.on_tree_select)
 
         control_frame = ttk.Frame(self.parent)
         control_frame.pack(fill="x", pady=5, padx=5)
@@ -141,9 +145,9 @@ class ScriptTab:
         self.update_step_button()
 
     def refresh_table(self):
-        self.table_text.delete("1.0", tk.END)
+        self.table.delete(*self.table.get_children())
         for i, row in enumerate(self.script_data, start=1):
-            self.table_text.insert(tk.END, f"{i} | {json.dumps(row)}\n")
+            self.table.insert("", "end", iid=str(i), values=(json.dumps(row),))
         self.update_step_button()
 
     def load_script(self):
@@ -227,6 +231,21 @@ class ScriptTab:
             self.running = False
 
         threading.Thread(target=run_loop, daemon=True).start()
+
+    def on_tree_select(self, event):
+        selected = self.table.selection()
+        if not selected:
+            return
+        item = self.table.item(selected[0])
+        try:
+            row = json.loads(item['values'][0])
+            for name in SERVO_NAMES:
+                value = row['servos'].get(name, 499)
+                self.servo_controls[name]['var'].set(value)
+                self.servo_controls[name]['scale'].set(value)
+            self.delay_var.set(row.get('delay', 2000))
+        except Exception as e:
+            print("error parsing selected row ->", e)
 
     def stop(self):
         self.running = False
