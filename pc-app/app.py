@@ -20,6 +20,8 @@ SERVO_NAMES = ["yaw", "horizontal", "vertical", "pitch", "twist", "grab"]
 
 
 class ServoControlGroup:
+    debounce_timers = {}
+
     def __init__(self, parent, name, index, write_callback):
         self.index = index
         self.write_callback = write_callback
@@ -49,8 +51,20 @@ class ServoControlGroup:
 
     def on_slider_change(self, value):
         val = int(float(value))
+        if self.value_var.get() == val:
+            return
         self.value_var.set(val)
-        self.write_callback("values_actual", VALUES_ACTUAL_ADDR + self.index, val)
+
+        key = f"servo_{self.index}"
+        if key in ServoControlGroup.debounce_timers:
+            ServoControlGroup.debounce_timers[key].cancel()
+
+        def delayed_send():
+            self.write_callback("values_actual", VALUES_ACTUAL_ADDR + self.index, val)
+
+        timer = threading.Timer(0.1, delayed_send)
+        ServoControlGroup.debounce_timers[key] = timer
+        timer.start()
 
     def on_entry_change(self, event):
         try:
