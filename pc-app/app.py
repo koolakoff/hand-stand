@@ -18,6 +18,7 @@ VALUES_MAX_ADDR = 30
 
 SERVO_NAMES = ["yaw", "horizontal", "vertical", "pitch", "twist", "grab"]
 
+
 class ServoControlGroup:
     def __init__(self, parent, name, index, write_callback):
         self.index = index
@@ -72,6 +73,7 @@ class ServoControlGroup:
         self.value_var.set(val)
         self.scale.set(val)
 
+
 class ScriptTab:
     def __init__(self, parent, write_logical_callback, write_logical_array_callback):
         self.parent = parent
@@ -101,11 +103,6 @@ class ScriptTab:
 
         control_frame = ttk.Frame(self.parent)
         control_frame.pack(fill="x", pady=5, padx=5)
-        ttk.Label(control_frame, text="number:").pack(side="left")
-        self.number_var = tk.IntVar(value=1)
-        self.number_entry = ttk.Entry(control_frame, width=5, textvariable=self.number_var)
-        self.number_entry.pack(side="left", padx=5)
-        self.number_entry.bind("<Return>", self.on_number_change)
 
         self.btn_step = ttk.Button(control_frame, text="Step", command=self.step)
         self.btn_step.pack(side="left", padx=2)
@@ -171,19 +168,6 @@ class ScriptTab:
         except Exception as e:
             messagebox.showerror("Error", f"Failed to save script: {e}")
 
-    def on_number_change(self, event=None):
-        idx = self.number_var.get() - 1
-        if 0 <= idx < len(self.script_data):
-            row = self.script_data[idx]
-            for name in SERVO_NAMES:
-                value = row["servos"].get(name, 499)
-                self.servo_controls[name]["var"].set(value)
-                self.servo_controls[name]["scale"].set(value)
-            self.delay_var.set(row.get("delay", 2000))
-            values = [row["servos"].get(name, 499) for name in SERVO_NAMES]
-            self.write_logical_array_callback(values)
-        self.update_step_button()
-
     def on_slider_change(self, name, value):
         val = int(float(value))
         self.servo_controls[name]["var"].set(val)
@@ -200,24 +184,40 @@ class ScriptTab:
             pass
 
     def add_after(self):
-        idx = self.number_var.get()
+        selected = self.table.selection()
+        if not selected:
+            index = len(self.script_data)
+        else:
+            all_iids = self.table.get_children()
+            index = all_iids.index(selected[0]) + 1
+
         new_row = {
             "servos": {name: self.servo_controls[name]["var"].get() for name in SERVO_NAMES},
             "delay": self.delay_var.get()
         }
-        self.script_data.insert(idx, new_row)
+        self.script_data.insert(index, new_row)
         self.refresh_table()
+        if self.table.get_children():
+            self.table.selection_set(self.table.get_children()[index if index < len(self.script_data) else -1])
 
     def update_step_button(self):
-        if self.number_var.get() >= len(self.script_data):
-            self.btn_step.config(state="disabled")
-        else:
+        if not self.table.selection():
             self.btn_step.config(state="normal")
 
     def step(self):
-        if self.number_var.get() < len(self.script_data):
-            self.number_var.set(self.number_var.get() + 1)
-            self.on_number_change()
+        all_iids = self.table.get_children()
+        selected = self.table.selection()
+        if not all_iids:
+            return
+        if not selected:
+            next_iid = all_iids[0]
+        else:
+            current_index = all_iids.index(selected[0])
+            next_index = current_index + 1 if current_index + 1 < len(all_iids) else current_index
+            next_iid = all_iids[next_index]
+        self.table.selection_set(next_iid)
+        self.table.focus(next_iid)
+        self.on_tree_select(None)
 
     def go(self):
         if self.running:
@@ -225,8 +225,10 @@ class ScriptTab:
         self.running = True
 
         def run_loop():
-            while self.running and self.number_var.get() < len(self.script_data):
+            while self.running:
                 self.step()
+                if not self.running:
+                    break
                 time.sleep(self.delay_var.get() / 1000.0)
             self.running = False
 
@@ -249,6 +251,7 @@ class ScriptTab:
 
     def stop(self):
         self.running = False
+
 
 class ModbusServoApp:
     def __init__(self, root):
@@ -361,6 +364,7 @@ class ModbusServoApp:
                 print("error send values_logical [0..5] -> connect failed")
         except Exception as e:
             print("error send values_logical [0..5] ->", e)
+
 
 if __name__ == "__main__":
     root = tk.Tk()
