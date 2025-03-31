@@ -9,6 +9,9 @@ import time
 # Constants
 LOGICAL_MIN = 0
 LOGICAL_MAX = 999
+ACTUAL_MIN = 500
+ACTUAL_MAX = 2500
+
 MODBUS_UNIT_ID = 1
 
 VALUES_LOGICAL_ADDR = 100
@@ -29,11 +32,11 @@ class ServoControlGroup:
         self.frame = ttk.LabelFrame(parent, text=name)
         self.frame.pack(fill='x', padx=5, pady=2)
 
-        initial_value = (LOGICAL_MIN + LOGICAL_MAX) // 2
+        initial_value = (ACTUAL_MIN + ACTUAL_MAX) // 2
         self.value_var = tk.IntVar(value=initial_value)
 
         self.scale = ttk.Scale(
-            self.frame, from_=LOGICAL_MIN, to=LOGICAL_MAX,
+            self.frame, from_=ACTUAL_MIN, to=ACTUAL_MAX,
             orient='horizontal', command=self.on_slider_change
         )
         self.scale.set(initial_value)
@@ -69,7 +72,7 @@ class ServoControlGroup:
     def on_entry_change(self, event):
         try:
             val = int(self.entry.get())
-            if LOGICAL_MIN <= val <= LOGICAL_MAX:
+            if ACTUAL_MIN <= val <= ACTUAL_MAX:
                 self.scale.set(val)
                 self.write_callback("values_actual", VALUES_ACTUAL_ADDR + self.index, val)
         except ValueError:

@@ -23,34 +23,22 @@ client = ModbusSerialClient(
     stopbits=1,
     bytesize=8,
     parity='N',
-    timeout=1
+    timeout=1,
 )
 
+# !! NOTE on each connect my arduino resets. most likely because
+# Most USB-to-Serial adapters (and Arduino, especially the Mega 2560)
+# automatically reboot when the COM port is opened. This behavior is caused by the DTR
+# (Data Terminal Ready) line, which "pulls" the RESET pin on the Arduino
+# through the capacitor every time the connection is opened.
+# TODO use another port - non USB.
 if not client.connect():
     print(f"Failed to connect to {serial_port}")
     exit()
 
 UNIT_ID = 1
-READY_FLAG_ADDRESS = 0
 START_ADDRESS = 10
 NUM_REGISTERS = 6
-
-# --- Wait for Arduino to be ready ---
-print("Waiting for device to be ready...")
-ready = False
-for _ in range(10):
-    response = client.read_holding_registers(address=READY_FLAG_ADDRESS, count=1, slave=UNIT_ID)
-    if not response.isError() and response.registers[0] == 1:
-        ready = True
-        break
-    time.sleep(0.5)
-
-if not ready:
-    print("Device not ready. Exiting.")
-    client.close()
-    exit()
-
-print("Device is ready.")
 
 # --- Read array from Arduino ---
 response = client.read_holding_registers(address=START_ADDRESS, count=NUM_REGISTERS, slave=UNIT_ID)
@@ -61,9 +49,10 @@ else:
     print("Read error:", response)
 
 # --- Write new array to Arduino ---
-new_values = [100, 200, 300, 400, 500, 600]
+# the 0 element will be used to set in servo. use 500..2500 value.
+new_values = [2500, 1500, 1500, 1500, 1500, 1500]
+#write_response = client.write_registers(address=START_ADDRESS, values=new_values, slave=UNIT_ID)
 write_response = client.write_registers(address=START_ADDRESS, values=new_values, slave=UNIT_ID)
-
 if write_response.isError():
     print("Write error:", write_response)
 else:
