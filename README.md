@@ -17,3 +17,4 @@ Libraries installation instructions
 1. For install python lib use command `pip install pymodbus pyserial`
 2. For install Arduino lib in Arduino studio run 
 `Sketch`->`Include library`->`Manage Libraries...` search and install `ModbusRTU Alexander Emelianov`
+3. The pointed arduino setup requires [drivers](http://www.wch.cn/downloads/CH341SER_ZIP.html )

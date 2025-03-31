@@ -401,23 +401,24 @@ class ModbusServoApp:
         if not port:
             self.set_status(False)
             return
-        self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
+        self.client = ModbusClient(port=port, baudrate=9600, timeout=1,
                                    stopbits=1, bytesize=8, parity='N')
         if not self.client.connect():
             self.set_status(False)
             print("error read values_actual -> connect failed")
             return
         try:
-            result = self.client.read_holding_registers(address=VALUES_ACTUAL_ADDR, count=6, unit=MODBUS_UNIT_ID)
-            if result.isError():
-                print("error read values_actual ->", result)
-                self.set_status(False)
-            else:
+
+            result = self.client.read_holding_registers(address=VALUES_ACTUAL_ADDR, count=6)
+            if hasattr(result, "registers"):
                 values = result.registers
                 print("got values_actual [0..5]", ", ".join(map(str, values)))
                 for i, val in enumerate(values):
                     self.servo_controls[i].update_value(val)
                 self.set_status(True)
+            else:
+                print("error read values_actual ->", result)
+                self.set_status(False)
         except Exception as e:
             print("error read values_actual ->", e)
             self.set_status(False)
@@ -437,10 +438,15 @@ class ModbusServoApp:
             return
         print(f"send {reg_type} [{address % 10}] {value}")
         try:
-            self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
-                                       stopbits=1, bytesize=8, parity='N')
+            self.client = ModbusClient(
+                port=port, baudrate=9600, timeout=1,
+                stopbits=1, bytesize=8, parity='N')
             if self.client.connect():
-                self.client.write_register(address=address, value=value, unit=MODBUS_UNIT_ID)
+                from pymodbus.payload import BinaryPayloadBuilder
+                builder = BinaryPayloadBuilder()
+                builder.add_16bit_uint(value)
+                payload = builder.to_registers()
+                self.client.write_register(address=address, value=payload[0])
                 self.client.close()
             else:
                 print(f"error send {reg_type} [{address % 10}] {value} -> connect failed")
@@ -459,10 +465,11 @@ class ModbusServoApp:
             return
         print("send values_logical [0..5]", ", ".join(map(str, values)))
         try:
-            self.client = ModbusClient(method='rtu', port=port, baudrate=9600, timeout=1,
+            self.client = ModbusClient(port=port, baudrate=9600, timeout=1,
                                        stopbits=1, bytesize=8, parity='N')
             if self.client.connect():
-                self.client.write_registers(address=VALUES_LOGICAL_ADDR, values=values, unit=MODBUS_UNIT_ID)
+
+                self.client.write_registers(address=VALUES_LOGICAL_ADDR, values=values)
                 self.client.close()
             else:
                 print("error send values_logical [0..5] -> connect failed")
