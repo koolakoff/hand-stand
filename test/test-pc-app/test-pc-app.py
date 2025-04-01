@@ -54,7 +54,7 @@ else:
 
 # --- Write new array to Arduino ---
 # the 0 element will be used to set in servo. use 500..2500 value.
-new_values = [2500, 1500, 1500, 1500, 1500, 1500]
+new_values = [1500, 1500, 1500, 1500, 1500, 1500]
 #write_response = client.write_registers(address=START_ADDRESS, values=new_values, slave=UNIT_ID)
 write_response = client.write_registers(address=START_ADDRESS, values=new_values, slave=UNIT_ID)
 if write_response.isError():

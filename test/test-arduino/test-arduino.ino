@@ -48,8 +48,8 @@ void setup() {
   for (uint8_t i = 0; i < REG_DATA_COUNT; i++) {
     uint16_t addr = REG_DATA_START + i;
     mb.addHreg(addr, data[i]);  // make each register writable and set initial value
-    mb.onSetHreg(addr, onHregSet);  // register write callback
   }
+  mb.onSetHreg(REG_DATA_START, onHregSet, REG_DATA_COUNT);  // register write callback
 
   servo.attach(2);
   servo.writeMicroseconds(500);
