@@ -1,5 +1,7 @@
+# Test app. Work with modbus. Read array, write array and read again to validate
+# uses 2nd com port in thse system (suppose 1st is used by arduino serial monitor)
+
 import serial.tools.list_ports
-import time
 from pymodbus.client import ModbusSerialClient
 
 # Automatically find the first available serial port
@@ -8,7 +10,7 @@ def find_first_serial_port():
     if not ports:
         print("No serial ports found.")
         return None
-    return ports[0].device  # Example: 'COM3', 'COM5', etc.
+    return ports[1].device  # Example: 'COM3', 'COM5', etc. - use second [1] port in the system
 
 # Main code
 serial_port = find_first_serial_port()
@@ -39,6 +41,8 @@ if not client.connect():
 UNIT_ID = 1
 START_ADDRESS = 10
 NUM_REGISTERS = 6
+
+print(f"connected")
 
 # --- Read array from Arduino ---
 response = client.read_holding_registers(address=START_ADDRESS, count=NUM_REGISTERS, slave=UNIT_ID)

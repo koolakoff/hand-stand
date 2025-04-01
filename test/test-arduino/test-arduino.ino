@@ -1,3 +1,9 @@
+// Test app.
+// test modbus and servo
+// config servo on pin 2
+// serial print on Serial (default serial port)
+// modbus on Serial1 (tx: d18, rx: d19)
+
 #include <ModbusRTU.h>
 #include <Servo.h>
 
@@ -11,10 +17,14 @@ const uint8_t REG_DATA_COUNT = 6;
 
 uint16_t data[REG_DATA_COUNT] = {500, 20, 30, 40, 50, 60};
 
+
 // --- Write callback: update array from register write ---
 uint16_t onHregSet(TRegister* reg, uint16_t val) {
+  char buffer[64]; // print buffer
   uint16_t addr = reg->address.address;  // Safely cast TAddress to uint16_t
   uint16_t index = addr - REG_DATA_START;
+  snprintf(buffer, sizeof(buffer), "set %d [%d]: %d", addr, index, val);
+  Serial.println(buffer);
   if (index < REG_DATA_COUNT) {
     if (index == 0) {
       servo.writeMicroseconds(constrain(val, 500, 2500));
@@ -25,8 +35,12 @@ uint16_t onHregSet(TRegister* reg, uint16_t val) {
 }
 
 void setup() {
+  // config debug print
   Serial.begin(9600);
-  mb.begin(&Serial);
+
+  // config modbus
+  Serial1.begin(9600);
+  mb.begin(&Serial1);
   mb.setBaudrate(9600);
   mb.slave(DEVICE_ID);
 
@@ -39,6 +53,8 @@ void setup() {
 
   servo.attach(2);
   servo.writeMicroseconds(500);
+
+  Serial.println("setup complete");
 }
 
 void loop() {
