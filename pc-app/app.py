@@ -445,11 +445,7 @@ class ModbusServoApp:
                 port=port, baudrate=9600, timeout=1,
                 stopbits=1, bytesize=8, parity='N')
             if self.client.connect():
-                from pymodbus.payload import BinaryPayloadBuilder
-                builder = BinaryPayloadBuilder()
-                builder.add_16bit_uint(value)
-                payload = builder.to_registers()
-                self.client.write_register(address=address, value=payload[0])
+                self.client.write_register(address=address, value=value)
                 self.client.close()
             else:
                 print(f"error send {reg_type} [{address % 10}] {value} -> connect failed")
