@@ -91,6 +91,58 @@ class ServoControlGroup:
         self.scale.set(val)
 
 
+class ScriptServoControl:
+    debounce_timers = {}
+    def __init__(self, parent, name, write_callback):
+        self.name = name
+        self.write_callback = write_callback
+        self.updating = False
+        self.var = tk.IntVar(value=499)
+
+        self.frame = ttk.LabelFrame(parent, text=name)
+        self.frame.pack(side="left", padx=5, pady=5)
+
+        self.entry = ttk.Entry(self.frame, width=5, textvariable=self.var)
+        self.entry.pack()
+        self.entry.bind("<Return>", self.on_entry_change)
+
+        self.scale = ttk.Scale(self.frame, from_=LOGICAL_MAX, to=LOGICAL_MIN, orient="vertical", length=225)
+        self.scale.set(499)
+        self.scale.pack()
+        self.scale.config(command=self.on_slider_change)
+
+    def on_slider_change(self, value):
+        if self.updating:
+            return
+        val = int(float(value))
+        if val == self.var.get():
+            return
+        self.var.set(val)
+
+        key = f"script_{self.name}"
+        if key in ScriptServoControl.debounce_timers:
+            ScriptServoControl.debounce_timers[key].cancel()
+
+        def delayed_send():
+            self.write_callback(self.name, val)
+
+        timer = threading.Timer(0.1, delayed_send)
+        ScriptServoControl.debounce_timers[key] = timer
+        timer.start()
+
+    def on_entry_change(self, event):
+        if self.updating:
+            return
+        try:
+            val = int(self.entry.get())
+            val = max(LOGICAL_MIN, min(LOGICAL_MAX, val))
+            self.var.set(val)
+            self.scale.set(val)
+            self.write_callback(self.name, val)
+        except ValueError:
+            pass
+
+
 class ScriptTab:
     def __init__(self, parent, write_logical_callback, write_logical_array_callback):
         self.parent = parent
@@ -98,7 +150,7 @@ class ScriptTab:
         self.write_logical_array_callback = write_logical_array_callback
         self.script_data = []
         self.running = False
-        self.slider_debounce_timers = {}
+
         self.setup_ui()
 
     def setup_ui(self):
@@ -139,19 +191,8 @@ class ScriptTab:
         servo_frame = ttk.Frame(self.parent)
         servo_frame.pack(fill="x", pady=5)
         for name in SERVO_NAMES:
-            group = ttk.LabelFrame(servo_frame, text=name)
-            group.pack(side="left", padx=5, pady=5)
-            var = tk.IntVar(value=499)
-            entry = ttk.Entry(group, width=5, textvariable=var)
-            entry.pack()
-            scale = ttk.Scale(group, from_=LOGICAL_MIN, to=LOGICAL_MAX, orient="vertical")
-            scale.set(499)
-            scale.pack()
-            self.servo_controls[name] = {"var": var, "scale": scale, "entry": entry, "updating": False}
-            scale.config(command=lambda val, n=name: self.on_slider_change(n, val))
-            entry.bind("<Return>", lambda e, n=name: self.on_entry_change(n))
-            scale.config(command=lambda val, n=name: self.on_slider_change(n, val))
-            entry.bind("<Return>", lambda e, n=name: self.on_entry_change(n))
+            control = ScriptServoControl(servo_frame, name, self.write_logical_callback)
+            self.servo_controls[name] = control
 
         delay_frame = ttk.Frame(self.parent)
         delay_frame.pack(pady=5)
@@ -203,18 +244,6 @@ class ScriptTab:
 
         self.servo_controls[name]["var"].set(val)
 
-        # Cancel previous timer if exists
-        if name in self.slider_debounce_timers:
-            self.slider_debounce_timers[name].cancel()
-
-        # Start new debounce timer
-        def delayed_send():
-            self.write_logical_callback(name, val)
-
-        timer = threading.Timer(0.1, delayed_send)
-        self.slider_debounce_timers[name] = timer
-        timer.start()
-
         self.write_logical_callback(name, val)
 
     def on_entry_change(self, name):
@@ -247,7 +276,7 @@ class ScriptTab:
             index = all_iids.index(selected[0]) + 1
 
         new_row = {
-            "servos": {name: self.servo_controls[name]["var"].get() for name in SERVO_NAMES},
+            "servos": {name: self.servo_controls[name].var.get() for name in SERVO_NAMES},
             "delay": self.delay_var.get()
         }
         self.script_data.insert(index, new_row)
@@ -314,12 +343,12 @@ class ScriptTab:
             row = json.loads(item['values'][0])
             for name in SERVO_NAMES:
                 value = row['servos'].get(name, 499)
-                self.servo_controls[name]["updating"] = True
-                self.servo_controls[name]['var'].set(value)
-                self.servo_controls[name]['scale'].set(value)
-                self.servo_controls[name]['entry'].delete(0, tk.END)
-                self.servo_controls[name]['entry'].insert(0, str(value))
-                self.servo_controls[name]["updating"] = False
+                self.servo_controls[name].updating = True
+                self.servo_controls[name].var.set(value)
+                self.servo_controls[name].scale.set(value)
+                self.servo_controls[name].entry.delete(0, tk.END)
+                self.servo_controls[name].entry.insert(0, str(value))
+                self.servo_controls[name].updating = False
             self.delay_var.set(row.get('delay', 2000))
             self.send_current_row()
             # self.send_current_row()
@@ -347,7 +376,7 @@ class ScriptTab:
             return
         try:
             index = self.table.index(selected[0])
-            values = {name: self.servo_controls[name]['var'].get() for name in SERVO_NAMES}
+            values = {name: self.servo_controls[name].var.get() for name in SERVO_NAMES}
             delay_val = self.delay_var.get()
             full = {"servos": values, "delay": delay_val}
             self.script_data[index] = full
