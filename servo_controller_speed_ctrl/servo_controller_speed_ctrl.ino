@@ -1,3 +1,8 @@
+// servo_controller_speed_ctrl.ino
+// Copyright (C) 2025 Petro Kulakov <https://github.com/koolakoff/hand-stand>
+// This file is part of hand-stand project and is licensed under the GPLv3.
+// See the LICENSE file in the root directory for full details.
+
 // Servo arm controller for 6DOF robotic arm on PWM servos.
 // support speed
 //

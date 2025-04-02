@@ -1,3 +1,9 @@
+
+# hand-stand/pc-app/app.py
+# Copyright (C) 2025 Petro Kulakov <https://github.com/koolakoff/hand-stand>
+# This file is part of hand-stand project and is licensed under the GPLv3.
+# See the LICENSE file in the root directory for full details.
+
 import tkinter as tk
 from tkinter import ttk, filedialog, messagebox
 from pymodbus.client.serial import ModbusSerialClient as ModbusClient

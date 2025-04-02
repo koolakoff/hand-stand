@@ -1,3 +1,8 @@
+// servo_controller.ino
+// Copyright (C) 2025 Petro Kulakov <https://github.com/koolakoff/hand-stand>
+// This file is part of hand-stand project and is licensed under the GPLv3.
+// See the LICENSE file in the root directory for full details.
+
 // Servo arm controller for 6DOF robotic arm on PWM servos.
 //
 // Servo pins: {d2, d3, d4, d5, d6, d7}
